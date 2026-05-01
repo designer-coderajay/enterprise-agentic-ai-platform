@@ -1,0 +1,138 @@
+version: '3.9'
+
+services:
+  # ── Backend API ──────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: infra/docker/backend.Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://agentic_user:secret@postgres:5432/agentic_ai
+      - REDIS_URL=redis://redis:6379/0
+      - QDRANT_HOST=qdrant
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    volumes:
+      - ./backend:/app/backend
+    command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # ── PostgreSQL MCP Server ────────────────────────────
+  postgres-mcp:
+    build:
+      context: .
+      dockerfile: infra/docker/backend.Dockerfile
+    ports:
+      - "8001:8001"
+    env_file: .env
+    depends_on:
+      - postgres
+    command: python -m backend.mcp_servers.postgres_mcp.server
+
+  # ── Document MCP Server ───────────────────────────────
+  document-mcp:
+    build:
+      context: .
+      dockerfile: infra/docker/backend.Dockerfile
+    ports:
+      - "8002:8002"
+    env_file: .env
+    command: python -m backend.mcp_servers.document_mcp.server
+
+  # ── Notification MCP Server ───────────────────────────
+  notification-mcp:
+    build:
+      context: .
+      dockerfile: infra/docker/backend.Dockerfile
+    ports:
+      - "8003:8003"
+    env_file: .env
+    command: python -m backend.mcp_servers.notification_mcp.server
+
+  # ── Celery Worker ─────────────────────────────────────
+  celery-worker:
+    build:
+      context: .
+      dockerfile: infra/docker/backend.Dockerfile
+    env_file: .env
+    depends_on:
+      - redis
+      - postgres
+    command: celery -A backend.core.celery_app worker --loglevel=info --concurrency=4
+
+  # ── Frontend ──────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../infra/docker/frontend.Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_WS_URL=ws://localhost:8000
+    depends_on:
+      - backend
+
+  # ── PostgreSQL ────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: agentic_user
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: agentic_ai
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentic_user -d agentic_ai"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis ─────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── Qdrant Vector DB ──────────────────────────────────
+  qdrant:
+    image: qdrant/qdrant:v1.13.2
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  # ── Prometheus ────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/prometheus.yml:/etc/prometheus/prometheus.yml
+
+  # ── Grafana ───────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+
+volumes:
+  postgres_data:
+  qdrant_data:
