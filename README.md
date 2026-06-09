@@ -1,59 +1,70 @@
 # Enterprise Agentic AI Platform
 
-> **Horizontal multi-agent knowledge platform with MCP integration — production-ready on AWS EKS.**
-> Built with LangGraph v0.3, FastMCP, LlamaIndex RAG, and real-time WebSocket streaming.
+> ### ⏱️ One Minute Interview Scan
+> **The Use Case:** An enterprise-grade, multi-agent backend capable of autonomous reasoning, tool execution, and self-correction over corporate data.
+> **The Architecture:** LangGraph (State Orchestration) + FastMCP (Tool Abstraction) + FastAPI/WebSockets (Real-time Streaming) deployed on AWS EKS.
+> **The Impact:** Moves beyond standard "search and summarize" RAG. This system plans multi-step actions, queries live databases, critiques its own output, and natively integrates with external APIs without hardcoded business logic. 
 
----
+## The Problem
+Standard RAG systems fail at multi-step reasoning. If a user asks a complex question requiring data from a PDF, a live PostgreSQL database, and a Slack notification, a traditional linear pipeline breaks. Hardcoding these integrations creates technical debt, and relying on a single LLM call for complex logic guarantees hallucinations and fragile execution.
 
-## What This Does
+## The Solution
+A dynamic, multi-agent architecture. We use LangGraph to orchestrate a continuous Planner-Executor-Critic loop. The LLM is decoupled from the tools using the Model Context Protocol (MCP). When the agent needs to query a database or read a document, it routes the request to isolated, scalable MCP servers. If the final answer is weak, the Critic node rejects it and forces the Executor to try again.
 
-A universal agentic AI backend that any enterprise can deploy to answer complex questions by:
+## Business Impact
+* **Autonomous Task Execution:** The system actively figures out *how* to solve a problem using available tools, reducing the need for human intervention.
+* **Self-Healing Accuracy:** The built-in Critic loop ensures the model revises its own work up to 3 times before returning an answer to the user.
+* **Infinite Extensibility:** Adding a new tool (like a Jira or Salesforce integration) simply means spinning up a new MCP server. Zero changes are required to the core agent logic.
 
-1. Retrieving relevant context from enterprise knowledge bases (RAG with Qdrant)
-2. Planning a multi-step approach using a Planner agent
-3. Executing tool calls via MCP servers (databases, documents, notifications)
-4. Critiquing the answer and revising up to 3× if quality is insufficient
-5. Streaming every agent reasoning step to the UI in real time via WebSocket
+## Deep Dive Architecture: Agent Loop & Tool Execution
 
-**Industries**: Financial services, healthcare, legal, manufacturing, e-commerce — any domain with large internal knowledge bases.
+An agentic system operates dynamically. Instead of a straight line, data moves through an orchestrated state machine (LangGraph) and calls external microservices (MCP) as needed.
 
----
+```text
+========================================================================
+PHASE 1: INGESTION & USER REQUEST (Input Handling)
+========================================================================
+[Raw Enterprise Data]    <- PDFs, S3 URIs, URLs
+      │
+      ▼
+[LlamaIndex Pipeline]    <- Semantic Splitter + OpenAI Embeddings
+      │
+      ▼
+[Qdrant Vector DB]       <- Stores dense vectors + sparse BM25 indices
+      │
+      ▼
+[User Prompt]            <- Sent via Next.js UI over WebSocket
+========================================================================
 
-## Architecture
-
-```
-┌─────────────────────────┐   WebSocket/REST   ┌────────────────────────────────────┐
-│     Next.js 14 UI       │ ◄────────────────► │        FastAPI Backend             │
-│   Real-time streaming   │                    │           Port 8000                │
-│   Agent trace sidebar   │                    └──────────────┬─────────────────────┘
-└─────────────────────────┘                                   │
-                                                              ▼
-                                          ┌───────────────────────────────────┐
-                                          │    LangGraph StateGraph           │
-                                          │                                   │
-                                          │  [Memory Retrieval]               │
-                                          │       ↓                           │
-                                          │  [Planner] → plan steps           │
-                                          │       ↓                           │
-                                          │  [Executor] → MCP tool calls      │
-                                          │       ↓                           │
-                                          │  [Critic] → score & critique      │
-                                          │       ↓ (if needs_revision)       │
-                                          │  [Executor] → retry (max 3×)      │
-                                          └───────────────┬───────────────────┘
-                                                          │
-                          ┌───────────────────────────────┼──────────────────────┐
-                          ▼                               ▼                      ▼
-                  ┌──────────────┐              ┌──────────────┐      ┌──────────────────┐
-                  │ Postgres MCP │              │ Document MCP │      │ Notification MCP │
-                  │   Port 8001  │              │  Port 8002   │      │   Port 8003      │
-                  │ query_db     │              │ extract_pdf  │      │ send_slack       │
-                  │ list_tables  │              │ search_doc   │      │ send_webhook     │
-                  └──────────────┘              └──────────────┘      └──────────────────┘
-                          │                               │
-                          ▼                               ▼
-                   PostgreSQL 16                     Qdrant Vector DB
-                   (asyncpg)                         (hybrid search)
+========================================================================
+PHASE 2: LANGGRAPH REASONING LOOP (State Machine)
+========================================================================
+[Memory Retrieval]       <- Pulls historical conversation context
+      │
+      ▼
+[Planner Agent]          <- Breaks prompt into a multi-step execution plan
+      │
+      ▼
+[Executor Agent] ────┐   <- Evaluates the plan and determines required tools
+      │              │
+      │              ▼
+      │        [FastMCP Servers via Streamable HTTP]
+      │        ├─> [PostgreSQL MCP] -> Runs SQL queries on live DB
+      │        ├─> [Document MCP]   -> Runs Hybrid Search on Qdrant
+      │        └─> [Notify MCP]     -> Triggers Slack/Webhook alerts
+      │              │
+      │              │ (Returns tool execution results back to state)
+      ▼              │
+[Critic Agent] <─────┘   <- Scores the assembled answer against the prompt
+      │
+      ├─> (If Score < Threshold & Revisions < 3) -> Routes back to [Executor]
+      │
+      ▼
+(If Score Pass or Max Revisions Hit)
+      │
+      ▼
+[WebSocket Stream]       <- Streams the final verified response to the UI
+========================================================================
 ```
 
 ---
