@@ -1,5 +1,5 @@
 # Enterprise Agentic AI Platform
-d
+
 > **The Use Case:** An enterprise-grade, multi-agent backend capable of autonomous reasoning, tool execution, and self-correction over corporate data.
 > **The Architecture:** LangGraph (State Orchestration) + FastMCP (Tool Abstraction) + FastAPI/WebSockets (Real-time Streaming) deployed on AWS EKS.
 > **The Impact:** Moves beyond standard "search and summarize" RAG. This system plans multi-step actions, queries live databases, critiques its own output, and natively integrates with external APIs without hardcoded business logic. 
